@@ -131,3 +131,135 @@ class RAMAgent(Agent):
 
 ram1 = RAMAgent()
 print(ram1.read(8))
+
+class SSDAgent(Agent):
+    def __init__(self, name: str = "SSDAgent", model: str = "gpt-5-nano", pages=1024, block_size=16, cache_size=64):
+        super().__init__(name, model)
+        # Эмуляция SSD
+        self.pages_count = pages
+        self.block_size = block_size
+        self.cache_size = cache_size
+        self.pages = [None] * pages       # физические страницы
+        self.ftl = {}                     # LBA -> физическая страница
+        self.cache = {}                   # DRAM-кэш
+        self.next_free = 0
+
+    def read(self, lba: int) -> bytes:
+        client = OpenAI()
+        functions = [
+            {
+                "name": "ssd_read",
+                "description": "Реализация метода READ в SSD",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "data": {
+                            "type": "string",
+                            "description": "Данные из запрошенного логического блока"
+                        }
+                    },
+                    "required": ["data"]
+                }
+            }
+        ]
+
+        response = client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content":
+                        "Ты модуль SSD. Ты работаешь с логическими блоками (LBA), кэшем DRAM и FTL. "
+                        "При получении LBA ты должен вернуть данные, находящиеся в этом логическом блоке. "
+                        "Если LBA находится в кэше, возвращай данные из кэша, иначе используй FTL для поиска физической страницы. "
+                        "Если данных нет или произошла ошибка, возвращай пустую строку. "
+                        "Пример: (cache: {1: 'abc'}, ftl: {2: 5}, pages: [None, 'data1', 'data2'], LBA: 1) -> 'abc'."
+                },
+                {
+                    "role": "user",
+                    "content":
+                        f"LBA для чтения: {lba}\n"
+                        f"Кэш: {self.cache}\n"
+                        f"FTL: {self.ftl}\n"
+                        f"Физические страницы: {self.pages}"
+                }
+            ],
+            functions=functions,
+            function_call={"name": "ssd_read"}
+        )
+
+        arguments = response.choices[0].message.function_call.arguments
+        read_output = json.loads(arguments)
+        data = read_output.get('data', '')  # возвращаем данные в виде строки
+        return data
+
+     def write(self, lba: int, data: str) -> str:
+        client = OpenAI()
+        functions = [
+            {
+                "name": "ssd_write",
+                "description": "Реализация метода WRITE в SSD",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "status": {
+                            "type": "string",
+                            "description": "Результат операции записи"
+                        }
+                    },
+                    "required": ["status"]
+                }
+            }
+        ]
+
+        response = client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content":
+                        "Ты модуль SSD. Ты работаешь с кэшем DRAM и FTL. "
+                        "При записи LBA необходимо сохранить данные в кэш, "
+                        "затем записать их в свободную физическую страницу. "
+                        "Если свободных страниц мало, вызови perform_gc(). "
+                        "Возвращай статус операции записи."
+                },
+                {
+                    "role": "user",
+                    "content":
+                        f"LBA для записи: {lba}\n"
+                        f"Данные: {data}\n"
+                        f"Кэш: {self.cache}\n"
+                        f"FTL: {self.ftl}\n"
+                        f"Физические страницы: {self.pages}"
+                }
+            ],
+            functions=functions,
+            function_call={"name": "ssd_write"}
+        )
+
+        arguments = response.choices[0].message.function_call.arguments
+        write_output = json.loads(arguments)
+        status = write_output.get('status', '')
+
+        # Эмуляция записи на уровне Python (исполнение LLM-команды)
+        if lba < 0 or lba >= self.pages_count:
+            return "Error: LBA out of range"
+
+        # Кэшируем данные
+        if len(self.cache) >= self.cache_size:
+            self.perform_gc()
+
+        self.cache[lba] = data
+
+        # Записываем в свободную физическую страницу
+        if self.next_free >= self.pages_count:
+            self.perform_gc()
+
+        phys_page = self.next_free
+        self.pages[phys_page] = self.cache.pop(lba)
+        self.ftl[lba] = phys_page
+        self.next_free += 1
+
+        return status or f"LBA {lba} written to page {phys_page}"
+
