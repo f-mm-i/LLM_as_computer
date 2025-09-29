@@ -2,7 +2,7 @@ import os
 from openai import OpenAI
 import json 
 
-def load_openai_api_key(file_path="LLM_as_computer/config.txt"):
+def load_openai_api_key(file_path="config.txt"):
     with open(file_path, "r") as f:
         for line in f:
             if line.startswith("OPENAI_API_KEY ="):
@@ -125,12 +125,52 @@ class RAMAgent(Agent):
         return read_output.get('value')
 
 
-    def write(self, need_index: int) -> str:
+    def write(self, addres: int, value: int):
+        client = OpenAI()
+        functions = [
+                {
+                    "name": "ram_write",
+                    "description": "Реализация метода WRITE в RAM",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "storage": {
+                                "type": "array",
+                                "items": {"type": "integer"},
+                                "description": "Массив чисел"
+                            }
+                        },
+                        "required": ["storage"]
+                    }
+                }
+            ]
+
+        response = client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Ты модуль в ОЗУ компьютера, который отвечает за операцию WRITE. "
+                                    "Ты получаешь на вход хранилище ОЗУ(массив чисел), индекс и значение. Ты должен вставить значение в хранилище по указанному индексу(нумерация в хранилище начинается с единицы)."
+                                    "Пример входных данных: (storage: [0, 0, 0, 0, 0, 0], index: 3, value: 25) -> ожидаемый вывод: [0, 0, 25, 0, 0, 0] "
+                                    "Если данный индекс не входит в хранилище, или произошла другая проблема тебе необходимо вернуть значение -1" # потом нужно будет сменить логику ошибки
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Хранилище: {self.ram_storage}, индекс: {addres}, значение: {value}"
+                    },
+                ],
+                functions=functions,
+                function_call={"name": "ram_write"},
+            )
+        arguments = response.choices[0].message.function_call.arguments
+        read_output = json.loads(arguments)
+        return read_output.get('storage')
         pass
 
 
-ram1 = RAMAgent()
-print(ram1.read(8))
+#ram1 = RAMAgent()
+#print(ram1.read(8))
 
 class SSDAgent(Agent):
     def __init__(self, name: str = "SSDAgent", model: str = "gpt-5-nano", pages=1024, block_size=16, cache_size=64):
@@ -193,7 +233,7 @@ class SSDAgent(Agent):
         data = read_output.get('data', '')  # возвращаем данные в виде строки
         return data
 
-     def write(self, lba: int, data: str) -> str:
+    def write(self, lba: int, data: str) -> str:
         client = OpenAI()
         functions = [
             {
@@ -262,4 +302,20 @@ class SSDAgent(Agent):
         self.next_free += 1
 
         return status or f"LBA {lba} written to page {phys_page}"
+'''
+ssd1 = SSDAgent()
+ssd1.cache = {1: "данные_кэша_LBA1".encode('utf-8'), 5: "данные_кэша_LBA5".encode('utf-8')}
+ssd1.ftl = {2: 0, 3: 1} # LBA 2 -> phys_page 0, LBA 3 -> phys_page 1
+ssd1.pages[0] = "физические_данные_страница0".encode('utf-8')
+ssd1.pages[1] = "физические_данные_страница1".encode('utf-8')
+#print(ssd1.write(1, "data1"))
+#print(ssd1.read(1))
+read_data_1 = ssd1.read(1) # Ожидаемое значение: "данные_кэша_LBA1"
+print(f"Чтение SSD LBA 1 (из кэша): {read_data_1}")
+read_data_2 = ssd1.read(2) # Ожидаемое значение: "физические_данные_страница0"
+print(f"Чтение SSD LBA 2 (из FTL): {read_data_2}")
+read_data_3 = ssd1.read(99) # Ожидаемое значение: "" (пустая строка)
+print(f"Чтение SSD LBA 99 (не найдено): {read_data_3}")
+'''
+
 
