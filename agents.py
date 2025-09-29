@@ -193,7 +193,7 @@ class SSDAgent(Agent):
         data = read_output.get('data', '')  # возвращаем данные в виде строки
         return data
 
-     def write(self, lba: int, data: str) -> str:
+    def write(self, lba: int, data: str) -> str:
         client = OpenAI()
         functions = [
             {
