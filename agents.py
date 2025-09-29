@@ -2,7 +2,7 @@ import os
 from openai import OpenAI
 import json 
 
-def load_openai_api_key(file_path="LLM_as_computer/config.txt"):
+def load_openai_api_key(file_path="config.txt"):
     with open(file_path, "r") as f:
         for line in f:
             if line.startswith("OPENAI_API_KEY ="):
@@ -125,7 +125,47 @@ class RAMAgent(Agent):
         return read_output.get('value')
 
 
-    def write(self, need_index: int) -> str:
+    def write(self, addres: int, value: int):
+        client = OpenAI()
+        functions = [
+                {
+                    "name": "ram_write",
+                    "description": "Реализация метода WRITE в RAM",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "storage": {
+                                "type": "array",
+                                "items": {"type": "integer"},
+                                "description": "Массив чисел"
+                            }
+                        },
+                        "required": ["storage"]
+                    }
+                }
+            ]
+
+        response = client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Ты модуль в ОЗУ компьютера, который отвечает за операцию WRITE. "
+                                    "Ты получаешь на вход хранилище ОЗУ(массив чисел), индекс и значение. Ты должен вставить значение в хранилище по указанному индексу(нумерация в хранилище начинается с единицы)."
+                                    "Пример входных данных: (storage: [0, 0, 0, 0, 0, 0], index: 3, value: 25) -> ожидаемый вывод: [0, 0, 25, 0, 0, 0] "
+                                    "Если данный индекс не входит в хранилище, или произошла другая проблема тебе необходимо вернуть значение -1" # потом нужно будет сменить логику ошибки
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Хранилище: {self.ram_storage}, индекс: {addres}, значение: {value}"
+                    },
+                ],
+                functions=functions,
+                function_call={"name": "ram_write"},
+            )
+        arguments = response.choices[0].message.function_call.arguments
+        read_output = json.loads(arguments)
+        return read_output.get('storage')
         pass
 
 
