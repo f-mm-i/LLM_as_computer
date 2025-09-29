@@ -169,9 +169,6 @@ class RAMAgent(Agent):
         pass
 
 
-ram1 = RAMAgent()
-print(ram1.read(8))
-
 class SSDAgent(Agent):
     def __init__(self, name: str = "SSDAgent", model: str = "gpt-5-nano", pages=1024, block_size=16, cache_size=64):
         super().__init__(name, model)
